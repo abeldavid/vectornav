@@ -66,6 +66,7 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories( vnccpplib/include )
+include_directories(${catkin_INCLUDE_DIRS})
 
 ## Declare a cpp library
 add_library(vn100
