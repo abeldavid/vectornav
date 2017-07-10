@@ -1400,7 +1400,13 @@ VN_ERROR_CODE vn200_setBinaryOutputRegisters(Vn200* vn200, int binary_data_port,
 
         int curBufLoc = 0;
         char cmdToSendBuilder[VN_MAX_COMMAND_SIZE];
-        curBufLoc = sprintf(cmdToSendBuilder, "$VNWRG,75,%d,%d,01,0202", binary_data_port, 800/imu_data_rate);
+        // http://www.binaryhexconverter.com/hex-to-binary-converter
+        // 0x0202 = 0000 0000 0000 0010 0000 0010
+        // 0x0201 = 0000 0000 0000 0010 0000 0001
+        // bit offset 0 = TimeStartup
+        // bit offset 1 = TimeGps
+        // bit offset 9 = Imu
+        curBufLoc = sprintf(cmdToSendBuilder, "$VNWRG,75,%d,%d,01,0201", binary_data_port, 800/imu_data_rate);
 
         cmdToSendBuilder[curBufLoc] = '\0';
 

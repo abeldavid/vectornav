@@ -41,6 +41,7 @@
 #include <vectornav/sensors.h>
 
 #include <vectornav/sync_in.h>
+#include <sensor_msgs/Imu.h>
 #include <ros/xmlrpc_manager.h>
 
 // Signal-safe flag for whether shutdown is requested
@@ -54,7 +55,13 @@ std::string imu_frame_id, gps_frame_id;
 ros::Publisher pub_ins;
 ros::Publisher pub_gps;
 ros::Publisher pub_sensors;
+ros::Publisher pub_imu;
 ros::Publisher pub_sync_in;
+
+// Timestamps
+bool refRecorded;
+ros::Time refROS;
+ros::Time refIMU;
 
 // Device
 Vn200 vn200;
@@ -129,7 +136,7 @@ struct gps_binary_data_struct gps_binary_data;
 
 struct imu_binary_data_struct
 {
-    uint64_t gps_time;
+    uint64_t time_startup;
     float accel_x;
     float accel_y;
     float accel_z;
@@ -224,11 +231,23 @@ void publish_ins_data()
         msg_ins.VelUncertainty  = ins_binary_data.vel_sigma;
 
         pub_ins.publish(msg_ins);
-    } 
+    }
+
 }
 
 void publish_imu_data()
 {
+
+    // On first IMU reading we should record our relative time
+    // We record both the ros time and the vectornav time so that we are in the same reference
+    // TimeStartup from the vectornav is in nanoseconds
+    if(!refRecorded) {
+        refRecorded = true;
+        refROS = ros::Time::now();
+        refIMU = ros::Time((double)imu_binary_data.time_startup*1E-9);
+        return;
+    }
+
     imu_seq++;
     ros::Time timestamp =  ros::Time::now(); 
     // IMU Data
@@ -238,7 +257,7 @@ void publish_imu_data()
         msg_sensors.header.seq      = imu_seq;
         msg_sensors.header.stamp    = timestamp;
         msg_sensors.header.frame_id = "imu";
-        msg_sensors.gps_time 	    = (double)imu_binary_data.gps_time*1E-9;
+        msg_sensors.gps_time 	    = (double)imu_binary_data.time_startup*1E-9;
         msg_sensors.Accel.x = imu_binary_data.accel_x;
         msg_sensors.Accel.y = imu_binary_data.accel_y;
         msg_sensors.Accel.z = imu_binary_data.accel_z;
@@ -248,6 +267,25 @@ void publish_imu_data()
         msg_sensors.Gyro.z = imu_binary_data.rotr_z;
 
         pub_sensors.publish(msg_sensors);
+    }
+    // IMU Data
+    if (pub_imu.getNumSubscribers() > 0)
+    {
+        sensor_msgs::Imu msg_imu;
+        msg_imu.header.seq      = imu_seq;
+        // calculate timestamp
+        // note we want it in the ros time, so we do
+        msg_imu.header.stamp    = refROS + (ros::Time((double)imu_binary_data.time_startup*1E-9) - refIMU);
+        msg_imu.header.frame_id = "imu";
+        msg_imu.linear_acceleration.x = imu_binary_data.accel_x;
+        msg_imu.linear_acceleration.y = imu_binary_data.accel_y;
+        msg_imu.linear_acceleration.z = imu_binary_data.accel_z;
+
+        msg_imu.angular_velocity.x = imu_binary_data.rotr_x;
+        msg_imu.angular_velocity.y = imu_binary_data.rotr_y;
+        msg_imu.angular_velocity.z = imu_binary_data.rotr_z;
+
+        pub_imu.publish(msg_imu);
     }
 }
 
@@ -286,7 +324,7 @@ void asyncBinaryResponseListener(Vn200* sender, unsigned char* data, unsigned in
         if (remainder(imu_msg, 500) == 0)
         {
             imu_msg = 0;
-            ROS_INFO_STREAM("IMU_Time: " << imu_binary_data.gps_time*1E-9 << " rotr_x: " <<
+            ROS_INFO_STREAM("IMU_Time: " << imu_binary_data.time_startup*1E-9 << " rotr_x: " <<
                     imu_binary_data.rotr_x << " rotr_y: " << imu_binary_data.rotr_y <<
                     " rotr_z: " << imu_binary_data.rotr_z << " accel_x: " <<
                     imu_binary_data.accel_x << " accel_y: " << imu_binary_data.accel_y <<
@@ -664,7 +702,7 @@ void poll_imu()
     }
 
     imu_seq++;
-    ros::Time timestamp =  ros::Time::now(); 
+    ros::Time timestamp = ros::Time::now();
 
     // IMU Data
     if (pub_sensors.getNumSubscribers() > 0)
@@ -835,10 +873,11 @@ int main( int argc, char* argv[] )
     n_.param<int>(        "binary_imu_data_output_rate"  , binary_imu_data_rate, 100); 
 
     // Initialize Publishers
-    pub_ins     = n_.advertise<vectornav::ins>    ("ins", 1000);
-    pub_gps     = n_.advertise<vectornav::gps>    ("gps", 1000);
-    pub_sensors = n_.advertise<vectornav::sensors>("imu", 1000);
+    pub_ins     = n_.advertise<vectornav::ins>    ("ins_custom", 1000);
+    pub_gps     = n_.advertise<vectornav::gps>    ("gps_custom", 1000);
+    pub_sensors = n_.advertise<vectornav::sensors>("imu_custom", 1000);
     pub_sync_in = n_.advertise<vectornav::sync_in>("sync_in", 1000);
+    pub_imu = n_.advertise<sensor_msgs::Imu>("imu", 1000);
 
 
     // Initialize VectorNav
